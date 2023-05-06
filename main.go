@@ -2,35 +2,49 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/lesismal/nbio/nbhttp"
 	"github.com/lesismal/nbio/nbhttp/websocket"
 )
 
-var (
-	onDataFrame      = flag.Bool("UseOnDataFrame", false, "Server will use OnDataFrame api instead of OnMessage")
-	errBeforeUpgrade = flag.Bool("error-before-upgrade", false, "return an error on upgrade with body")
-)
+type Timeline struct {
+	Id          int    `json:"id"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
 
-func newUpgrader() *websocket.Upgrader {
-	u := websocket.NewUpgrader()
-	if *onDataFrame {
-		u.OnDataFrame(func(c *websocket.Conn, messageType websocket.MessageType, fin bool, data []byte) {
-			// echo
-			c.WriteFrame(messageType, true, fin, data)
-		})
-	} else {
-		u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
-			// echo
-			c.WriteMessage(messageType, data)
-		})
+type wsHandler struct {
+	mu        sync.Mutex
+	timelines []Timeline
+}
+
+func (h *wsHandler) saveMewssage(data []byte) {
+	var timeline Timeline
+	err := json.Unmarshal(data, &timeline)
+	if err == nil {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.timelines = append(h.timelines, timeline)
 	}
+}
+
+func (h *wsHandler) newUpgrader() *websocket.Upgrader {
+	u := websocket.NewUpgrader()
+
+	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
+		h.saveMewssage(data)
+		c.WriteMessage(messageType, data)
+	})
 
 	u.OnClose(func(c *websocket.Conn, err error) {
 		fmt.Println("OnClose:", c.RemoteAddr().String(), err)
@@ -44,18 +58,15 @@ func newUpgrader() *websocket.Upgrader {
 	return u
 }
 
-func onWebsocket(w http.ResponseWriter, r *http.Request) {
-	if *errBeforeUpgrade {
+func (h *wsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	upgrader := h.newUpgrader()
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("returning an error"))
 		return
 	}
-	// time.Sleep(time.Second * 5)
-	upgrader := newUpgrader()
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		panic(err)
-	}
+
 	wsConn := conn.(*websocket.Conn)
 	wsConn.SetReadDeadline(time.Time{})
 	fmt.Println("OnOpen:", wsConn.RemoteAddr().String())
@@ -64,7 +75,7 @@ func onWebsocket(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	mux := &http.ServeMux{}
-	mux.HandleFunc("/ws", onWebsocket)
+	mux.Handle("/ws", new(wsHandler))
 
 	svr := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
