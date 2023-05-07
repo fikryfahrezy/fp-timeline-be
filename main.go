@@ -23,18 +23,52 @@ type Timeline struct {
 	Description string `json:"description"`
 }
 
+type TimelineMessage struct {
+	Timeline
+	Type string `json:"type"`
+}
+
 type wsHandler struct {
 	mu        sync.Mutex
 	timelines []Timeline
 }
 
 func (h *wsHandler) saveMewssage(data []byte) {
-	var timeline Timeline
-	err := json.Unmarshal(data, &timeline)
+	var timelineMessage TimelineMessage
+	err := json.Unmarshal(data, &timelineMessage)
 	if err == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		h.timelines = append(h.timelines, timeline)
+
+		timelineIndex := -1
+		for i, timeline := range h.timelines {
+			if timelineMessage.Id == timeline.Id {
+				timelineIndex = i
+			}
+		}
+
+		if timelineMessage.Type == "DELETE" {
+			h.timelines = append(
+				h.timelines[:timelineIndex],
+				h.timelines[timelineIndex+1:]...,
+			)
+			return
+		}
+
+		newTimeline := Timeline{
+			Id:          timelineMessage.Id,
+			StartDate:   timelineMessage.StartDate,
+			EndDate:     timelineMessage.EndDate,
+			Title:       timelineMessage.Title,
+			Description: timelineMessage.Description,
+		}
+
+		if timelineIndex != -1 {
+			h.timelines[timelineIndex] = newTimeline
+			return
+		}
+
+		h.timelines = append(h.timelines, newTimeline)
 	}
 }
 
