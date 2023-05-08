@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +13,13 @@ import (
 	"github.com/lesismal/nbio/nbhttp"
 	"github.com/lesismal/nbio/nbhttp/websocket"
 )
+
+var (
+	keepaliveTime    = time.Second * 5
+	keepaliveTimeout = keepaliveTime + time.Second*3
+)
+
+var clientMgr *ClientMgr
 
 type Timeline struct {
 	Id          int    `json:"id"`
@@ -28,29 +34,42 @@ type TimelineMessage struct {
 	Type string `json:"type"`
 }
 
-type wsHandler struct {
-	mu        sync.Mutex
-	timelines []Timeline
+// ClientMgr .
+type ClientMgr struct {
+	mux           sync.Mutex
+	chStop        chan struct{}
+	clients       map[*websocket.Conn]struct{}
+	timelines     []Timeline
+	keepaliveTime time.Duration
 }
 
-func (h *wsHandler) saveMewssage(data []byte) {
+// NewClientMgr .
+func NewClientMgr(keepaliveTime time.Duration) *ClientMgr {
+	return &ClientMgr{
+		chStop:        make(chan struct{}),
+		clients:       map[*websocket.Conn]struct{}{},
+		keepaliveTime: keepaliveTime,
+	}
+}
+
+func (cm *ClientMgr) SaveMewssage(data []byte) {
 	var timelineMessage TimelineMessage
 	err := json.Unmarshal(data, &timelineMessage)
 	if err == nil {
-		h.mu.Lock()
-		defer h.mu.Unlock()
+		cm.mux.Lock()
+		defer cm.mux.Unlock()
 
 		timelineIndex := -1
-		for i, timeline := range h.timelines {
+		for i, timeline := range cm.timelines {
 			if timelineMessage.Id == timeline.Id {
 				timelineIndex = i
 			}
 		}
 
 		if timelineMessage.Type == "DELETE" {
-			h.timelines = append(
-				h.timelines[:timelineIndex],
-				h.timelines[timelineIndex+1:]...,
+			cm.timelines = append(
+				cm.timelines[:timelineIndex],
+				cm.timelines[timelineIndex+1:]...,
 			)
 			return
 		}
@@ -64,52 +83,100 @@ func (h *wsHandler) saveMewssage(data []byte) {
 		}
 
 		if timelineIndex != -1 {
-			h.timelines[timelineIndex] = newTimeline
+			cm.timelines[timelineIndex] = newTimeline
 			return
 		}
 
-		h.timelines = append(h.timelines, newTimeline)
+		cm.timelines = append(cm.timelines, newTimeline)
 	}
 }
 
-func (h *wsHandler) newUpgrader() *websocket.Upgrader {
-	u := websocket.NewUpgrader()
+// Add .
+func (cm *ClientMgr) Add(c *websocket.Conn) {
+	cm.mux.Lock()
+	defer cm.mux.Unlock()
+	cm.clients[c] = struct{}{}
+}
 
-	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
-		h.saveMewssage(data)
-		c.WriteMessage(messageType, data)
+// Delete .
+func (cm *ClientMgr) Delete(c *websocket.Conn) {
+	cm.mux.Lock()
+	defer cm.mux.Unlock()
+	delete(cm.clients, c)
+}
+
+// Run .
+func (cm *ClientMgr) Run() {
+	ticker := time.NewTicker(cm.keepaliveTime)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			func() {
+				cm.mux.Lock()
+				defer cm.mux.Unlock()
+				for wsConn := range cm.clients {
+					wsConn.WriteMessage(websocket.PingMessage, nil)
+				}
+				fmt.Printf("keepalive: ping %v clients\n", len(cm.clients))
+			}()
+		case <-cm.chStop:
+			return
+		}
+	}
+}
+
+// Stop .
+func (cm *ClientMgr) Stop() {
+	close(cm.chStop)
+}
+
+func (cm *ClientMgr) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.NewUpgrader()
+	upgrader.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
+		cm.SaveMewssage(data)
+
+		// send message
+		for wsConn := range cm.clients {
+			wsConn.WriteMessage(messageType, data)
+		}
+
+		// update read deadline
+		c.SetReadDeadline(time.Now().Add(keepaliveTimeout))
 	})
-
-	u.OnClose(func(c *websocket.Conn, err error) {
-		fmt.Println("OnClose:", c.RemoteAddr().String(), err)
+	upgrader.SetPongHandler(func(c *websocket.Conn, s string) {
+		// update read deadline
+		c.SetReadDeadline(time.Now().Add(keepaliveTimeout))
 	})
 
 	// allow all host
-	u.CheckOrigin = func(r *http.Request) bool {
+	upgrader.CheckOrigin = func(r *http.Request) bool {
 		return true
 	}
 
-	return u
-}
-
-func (h *wsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	upgrader := h.newUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte("returning an error"))
-		return
+		panic(err)
 	}
-
 	wsConn := conn.(*websocket.Conn)
-	wsConn.SetReadDeadline(time.Time{})
-	fmt.Println("OnOpen:", wsConn.RemoteAddr().String())
+
+	// init read deadline
+	wsConn.SetReadDeadline(time.Now().Add(keepaliveTimeout))
+
+	clientMgr.Add(wsConn)
+	wsConn.OnClose(func(c *websocket.Conn, err error) {
+		clientMgr.Delete(c)
+	})
 }
 
 func main() {
-	flag.Parse()
+	clientMgr = NewClientMgr(keepaliveTime)
+	go clientMgr.Run()
+	defer clientMgr.Stop()
+
 	mux := &http.ServeMux{}
-	mux.Handle("/ws", new(wsHandler))
+	mux.Handle("/ws", clientMgr)
 
 	svr := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
