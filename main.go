@@ -49,6 +49,15 @@ func NewClientMgr(keepaliveTime time.Duration) *ClientMgr {
 		chStop:        make(chan struct{}),
 		clients:       map[*websocket.Conn]struct{}{},
 		keepaliveTime: keepaliveTime,
+		timelines: []Timeline{
+			{
+				Id:          1,
+				StartDate:   "2022-01-02",
+				EndDate:     "2022-01-02",
+				Title:       "Title",
+				Description: "Description",
+			},
+		},
 	}
 }
 
@@ -132,7 +141,7 @@ func (cm *ClientMgr) Stop() {
 	close(cm.chStop)
 }
 
-func (cm *ClientMgr) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (cm *ClientMgr) onWebsocket(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.NewUpgrader()
 	upgrader.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
 		cm.SaveMewssage(data)
@@ -170,13 +179,20 @@ func (cm *ClientMgr) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (cm *ClientMgr) onGetTimelines(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(cm.timelines)
+}
+
 func main() {
 	clientMgr = NewClientMgr(keepaliveTime)
 	go clientMgr.Run()
 	defer clientMgr.Stop()
 
 	mux := &http.ServeMux{}
-	mux.Handle("/ws", clientMgr)
+	mux.HandleFunc("/ws", clientMgr.onWebsocket)
+	mux.HandleFunc("/timelines", clientMgr.onGetTimelines)
 
 	svr := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
