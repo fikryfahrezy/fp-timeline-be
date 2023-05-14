@@ -148,7 +148,9 @@ func (cm *ClientMgr) onWebsocket(w http.ResponseWriter, r *http.Request) {
 
 		// send message
 		for wsConn := range cm.clients {
-			wsConn.WriteMessage(messageType, data)
+			if c.RemoteAddr().String() != wsConn.RemoteAddr().String() {
+				wsConn.WriteMessage(messageType, data)
+			}
 		}
 
 		// update read deadline
