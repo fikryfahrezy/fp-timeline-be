@@ -6,13 +6,8 @@ on:
       - "main"
 
 jobs:
-  build:
+  docker:
     runs-on: ubuntu-latest
-    services:
-      registry:
-        image: registry:2
-        ports:
-          - 5000:5000
     steps:
       -
         name: Checkout
@@ -24,10 +19,6 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-      -
-        name: Ping Tailscale
-        run: | 
-          ping -c 5 100.123.154.125
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3      
@@ -43,8 +34,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: localhost:5000/name/app:latest
+          tags: ${{ secrets.DOCKER_REGISTRY }}/name/app:latest
       -
         name: Inspect
         run: |
-          docker buildx imagetools inspect localhost:5000/name/app:latest
+          docker buildx imagetools inspect ${{ secrets.DOCKER_REGISTRY }}/name/app:latest
