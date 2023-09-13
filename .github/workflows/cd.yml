@@ -17,6 +17,17 @@ jobs:
       -
         name: Checkout
         uses: actions/checkout@v4
+      - 
+        name: Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      -
+        name: Ping Tailscale
+        run: | 
+          ping -c 5 100.123.154.125
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3      
@@ -33,6 +44,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: localhost:5000/name/app:latest
-      - name: Inspect
+      -
+        name: Inspect
         run: |
           docker buildx imagetools inspect localhost:5000/name/app:latest
