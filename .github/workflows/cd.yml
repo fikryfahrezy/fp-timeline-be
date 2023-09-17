@@ -32,7 +32,7 @@ jobs:
         with:
           driver-opts: network=host
           config-inline: |
-            [registry.${{ secrets.DOCKER_REGISTRY }}]
+            [registry."${{ secrets.DOCKER_REGISTRY }}"]
               http = true
               insecure = true
       -
