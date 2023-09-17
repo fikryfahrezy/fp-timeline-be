@@ -25,7 +25,7 @@ jobs:
           curl ${{ secrets.DOCKER_REGISTRY }}
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v3      
+        uses: docker/setup-qemu-action@v3
       - 
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,8 +42,10 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_REGISTRY }}/name/app:latest
+          tags: ${{ secrets.DOCKER_REGISTRY }}/fp-timeline-be:latest
+          labels: |
+            com.centurylinklabs.watchtower.enable=true
       -
         name: Inspect
         run: |
-          docker buildx imagetools inspect ${{ secrets.DOCKER_REGISTRY }}/name/app:latest
+          docker buildx imagetools inspect ${{ secrets.DOCKER_REGISTRY }}/fp-timeline-be:latest

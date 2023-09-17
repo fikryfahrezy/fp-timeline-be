@@ -1,6 +1,6 @@
 module github.com/fikryfahrezy/fp-timeline-be
 
-go 1.17
+go 1.21
 
 require github.com/lesismal/nbio v1.3.12
 

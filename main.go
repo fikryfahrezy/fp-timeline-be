@@ -194,11 +194,11 @@ func main() {
 
 	mux := &http.ServeMux{}
 	mux.HandleFunc("/ws", clientMgr.onWebsocket)
-	mux.HandleFunc("/timelines", clientMgr.onGetTimelines)
+	mux.HandleFunc("/timelines-wrong", clientMgr.onGetTimelines)
 
 	svr := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
-		Addrs:   []string{"localhost:8888"},
+		Addrs:   []string{":8888"},
 		Handler: mux,
 	})
 
