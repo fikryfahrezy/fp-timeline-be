@@ -22,7 +22,7 @@ jobs:
       -
         name: Ping Tailscale
         run: |
-          ping -c 5 ${{ secrets.DOCKER_REGISTRY }}
+          curl ${{ secrets.DOCKER_REGISTRY }}
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3      
